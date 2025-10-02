@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>NodBot — Full System (SIP & SWP Updated)</title>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--accent:#006b5e;--muted:#475569;--danger:#ef4444}
+*{box-sizing:border-box;font-family:Inter,system-ui,Arial,Helvetica,sans-serif}
+body{margin:0;background:var(--bg);color:#061024}
+header{background:linear-gradient(90deg,var(--accent),#06b6d4);color:white;padding:14px}
+.container{display:flex;min-height:calc(100vh - 64px)}
+nav{width:260px;background:var(--card);border-right:1px solid #e6eef6;padding:12px}
+nav .brand{font-weight:800;margin-bottom:8px}
+nav button{display:block;width:100%;text-align:left;padding:10px;border-radius:8px;border:none;background:none;cursor:pointer;margin-bottom:6px}
+main{flex:1;padding:18px}
+.card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(2,6,23,0.06);margin-bottom:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.col{flex:1;min-width:200px}
+label{display:block;color:var(--muted);font-size:13px;margin-top:8px}
+input,select,textarea,button{font-size:14px;padding:8px;border-radius:8px;border:1px solid #dbe7ee}
+button.primary{background:var(--accent);color:white;border:none}
+button.ghost{background:#f1f5f9}
+button.warn{background:#f59e0b;color:white;border:none}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+th,td{padding:8px;border-bottom:1px solid #eef2f7;text-align:left}
+th{background:#eef7f5}
+.small{font-size:13px;color:var(--muted)}
+.footer{padding:12px;text-align:center;color:var(--muted)}
+@media(max-width:880px){nav{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <h2 style="margin:0">NodBot — All-in-One MiniBank & Shop</h2>
+      <div class="small">Now with full SIP & SWP calculation + management</div>
+    </div>
+    <div class="small">Default admin: <strong>admin / nodbotadmin</strong></div>
+  </div>
+</header>
+
+<div class="container">
+  <nav id="sidebar">
+    <div class="brand">Menu</div>
+    <div id="menuBtns"><div class="small">Login to view modules</div></div>
+    <hr>
+    <div class="small">Logged as: <span id="who">not logged</span></div>
+    <div style="margin-top:10px">
+      <button id="btnExport" class="ghost">Export JSON</button>
+      <button id="btnImport" class="ghost">Import JSON</button>
+      <button id="btnReset" class="warn">Reset Data</button>
+    </div>
+  </nav>
+
+  <main>
+    <div id="loginCard" class="card">
+      <h3>Login / Register</h3>
+      <div class="row">
+        <div class="col">
+          <label>Admin Login</label>
+          <input id="adminUser" placeholder="admin" value="admin">
+          <input id="adminPass" type="password" placeholder="password" value="nodbotadmin">
+          <button id="adminLogin" class="primary">Login as Admin</button>
+        </div>
+        <div class="col">
+          <label>Staff Login</label>
+          <input id="staffUser" placeholder="staff name">
+          <button id="staffLogin" class="primary">Login as Staff</button>
+          <div class="small">Add staff from Admin panel</div>
+        </div>
+        <div class="col">
+          <label>Member Login / Register</label>
+          <input id="memberId" placeholder="Member ID (e.g. M1234)">
+          <input id="memberPass" type="password" placeholder="password">
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="memberLogin" class="primary">Login</button>
+            <button id="memberRegister" class="ghost">Register</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="appArea" style="display:none">
+      <div class="card">
+        <div class="row">
+          <div class="col"><div class="small">User</div><div id="userInfo" style="font-weight:700"></div></div>
+          <div style="width:220px;text-align:right"><button id="logoutBtn" class="warn">Logout</button></div>
+        </div>
+      </div>
+
+      <div id="view" ></div>
+    </div>
+
+  </main>
+</div>
+
+<div class="footer">NodBot — Local demo system. Export JSON to backup. For production use server & authentication.</div>
+
+<script>
+/* --------------------------
+  Storage keys & defaults
+---------------------------*/
+const K = {
+  settings:'nod_settings_v2',
+  staff:'nod_staff_v2',
+  members:'nod_members_v2',
+  products:'nod_products_v2',
+  ledger:'nod_ledger_v2',
+  loans:'nod_loans_v2',
+  sips:'nod_sips_v2',
+  swps:'nod_swps_v2',
+  dailyPlans:'nod_dailyPlans_v2',
+  collections:'nod_collections_v2',
+  events:'nod_events_v2',
+  fund:'nod_fund_v2'
+};
+const DEFAULTS = { adminUser:'admin', adminPass:'nodbotadmin', dailyInterestAnnual:5, loanMonthlyPct:2 };
+const load = (k,d)=> JSON.parse(localStorage.getItem(k) || JSON.stringify(d||[]));
+const save = (k,v)=> localStorage.setItem(k, JSON.stringify(v));
+const nowISO = ()=> new Date().toISOString();
+const today = ()=> new Date().toISOString().slice(0,10);
+const uid = (p)=> p + Math.floor(1000 + Math.random()*9000);
+
+/* load or init */
+let SETTINGS = load(K.settings, DEFAULTS);
+let STAFF = load(K.staff, []);
+let MEMBERS = load(K.members, []);
+let PRODUCTS = load(K.products, []);
+let LEDGER = load(K.ledger, []);
+let LOANS = load(K.loans, []);
+let SIPS = load(K.sips, []);
+let SWPS = load(K.swps, []);
+let DAILY_PLANS = load(K.dailyPlans, []);
+let COLLECTIONS = load(K.collections, []);
+let EVENTS = load(K.events, []);
+let FUND = load(K.fund, {balance:0});
+
+/* ensure small defaults */
+if(STAFF.length===0){ STAFF.push({name:'Collector1', role:'collector', tasksCompleted:0}); save(K.staff,STAFF); }
+if(PRODUCTS.length===0){ PRODUCTS.push({id:uid('P'),name:'NodBot Notebook',price:55,stock:500,sold:0}); save(K.products,PRODUCTS); }
+if(MEMBERS.length===0){ const id=uid('M'); MEMBERS.push({id,name:'Demo User',phone:'',pass:'demo',balance:0}); save(K.members,MEMBERS); }
+
+/* context */
+let CTX = {role:null,id:null,name:null};
+
+/* UI refs */
+const loginCard = document.getElementById('loginCard');
+const appArea = document.getElementById('appArea');
+const userInfo = document.getElementById('userInfo');
+const menuBtns = document.getElementById('menuBtns');
+const view = document.getElementById('view');
+const who = document.getElementById('who');
+
+/* ledger helper */
+function addLedger(e){ LEDGER.push(Object.assign({id:Date.now(),date:nowISO()}, e)); save(K.ledger, LEDGER); }
+
+/* build sidebar menu */
+function buildMenu(){
+  menuBtns.innerHTML = '';
+  function b(t,fn,cls){ const btn=document.createElement('button'); btn.textContent=t; if(cls) btn.className=cls; btn.addEventListener('click',fn); menuBtns.appendChild(btn); }
+  if(CTX.role==='admin' || CTX.role==='master'){
+    b('Dashboard', renderDashboard);
+    b('Members', renderMembersAdmin);
+    b('Staff', renderStaffAdmin);
+    b('Products', renderProductsAdmin);
+    b('Daily Plans', renderDailyPlansAdmin);
+    b('Collections', renderCollectionsAdmin);
+    b('Loans', renderLoansAdmin);
+    b('SIP / SWP', renderSIPSWPAdmin);
+    b('Events', renderEventsAdmin);
+    b('Reports', renderReports);
+    b('Settings', renderSettings);
+  }
+  if(CTX.role==='staff'){
+    b('My Tasks', renderStaffTasks);
+    b('Quick Collect', renderQuickCollect);
+    b('Run Daily Plans', renderDailyPlansRun);
+    b('Record Sale', renderSalesStaff);
+    b('My Collections', ()=>renderCollectionsList(CTX.name));
+    b('SIP / SWP - Pay', renderSIPSWPStaff);
+  }
+  if(CTX.role==='member'){
+    b('My Dashboard', renderMemberDashboard);
+    b('My Daily Plans', renderMemberDailyPlans);
+    b('My SIP / SWP', renderMemberSIPSWP);
+    b('My Loans', renderMemberLoans);
+    b('Events', renderMemberEvents);
+    b('Passbook', ()=>renderPassbook(CTX.id));
+  }
+  document.getElementById('btnExport').onclick = exportAll;
+  document.getElementById('btnImport').onclick = importAll;
+  document.getElementById('btnReset').onclick = ()=>{ if(confirm('Clear all data?')){ localStorage.clear(); location.reload(); } };
+}
+
+/* Login handlers */
+document.getElementById('adminLogin').addEventListener('click', ()=>{
+  const user = document.getElementById('adminUser').value;
+  const pass = document.getElementById('adminPass').value;
+  if(user === SETTINGS.adminUser && pass === SETTINGS.adminPass){ CTX={role:'admin',id:'admin',name:'Admin'}; openApp(); } else alert('Wrong admin credentials');
+});
+document.getElementById('staffLogin').addEventListener('click', ()=>{
+  const name = document.getElementById('staffUser').value.trim(); if(!name) return alert('Enter staff name'); if(!STAFF.find(s=>s.name===name)) return alert('Staff not found'); CTX={role:'staff',id:name,name}; openApp();
+});
+document.getElementById('memberRegister').addEventListener('click', ()=>{
+  const name = prompt('Full name'); const phone = prompt('Phone'); const pass = prompt('Set password'); if(!name||!pass) return alert('Name & password required'); const id=uid('M'); MEMBERS.push({id,name,phone,pass,balance:0}); save(K.members,MEMBERS); alert('Member created. ID: '+id);
+});
+document.getElementById('memberLogin').addEventListener('click', ()=>{
+  const id=document.getElementById('memberId').value.trim(); const pass=document.getElementById('memberPass').value;
+  const m = MEMBERS.find(x=>x.id===id && x.pass===pass); if(!m) return alert('Member not found or wrong password'); CTX={role:'member',id:m.id,name:m.name}; openApp();
+});
+document.getElementById('logoutBtn').addEventListener('click', ()=> location.reload());
+
+function openApp(){ loginCard.style.display='none'; appArea.style.display='block'; userInfo.textContent = CTX.name + ' ('+CTX.role+')'; who.textContent = CTX.name + ' ('+CTX.role+')'; buildMenu(); renderDashboard(); }
+
+/* ---------------- Dashboard ---------------- */
+function renderDashboard(){
+  view.innerHTML=''; const c=document.createElement('div'); c.className='card';
+  c.innerHTML = `<h3>Dashboard</h3>`;
+  const totals=document.createElement('div'); totals.className='row';
+  const t1=document.createElement('div'); t1.className='col card'; t1.innerHTML=`<div class="small">Members</div><div style="font-weight:700">${MEMBERS.length}</div>`;
+  const activeLoans = LOANS.filter(l=>!l.closed).length; const t2=document.createElement('div'); t2.className='col card'; t2.innerHTML=`<div class="small">Active Loans</div><div style="font-weight:700">${activeLoans}</div>`;
+  const totalCollections = COLLECTIONS.reduce((s,c)=>s+c.amount,0); const t3=document.createElement('div'); t3.className='col card'; t3.innerHTML=`<div class="small">Total Collections</div><div style="font-weight:700">₹${totalCollections}</div>`;
+  const t4=document.createElement('div'); t4.className='col card'; t4.innerHTML=`<div class="small">Community Fund</div><div style="font-weight:700">₹${FUND.balance||0}</div>`;
+  totals.appendChild(t1); totals.appendChild(t2); totals.appendChild(t3); totals.appendChild(t4);
+  c.appendChild(totals);
+  c.innerHTML += `<div style="margin-top:12px"><button class="primary" onclick="renderMembersAdmin()">Members</button> <button class="primary" onclick="renderDailyPlansAdmin()">Daily Plans</button> <button class="primary" onclick="renderSIPSWPAdmin()">SIP/SWP</button> <button class="primary" onclick="renderReports()">Reports</button></div>`;
+  view.appendChild(c);
+}
+
+/* ---------------- Members ---------------- */
+function renderMembersAdmin(){
+  view.innerHTML=''; const c=document.createElement('div'); c.className='card';
+  c.innerHTML = `<h3>Member Management</h3><div class="row"><div class="col"><label>New member name</label><input id="mName"><label>Phone</label><input id="mPhone"><label>Password</label><input id="mPass" type="password"><button id="addM" class="primary">Add Member</button></div><div class="col"><h4>Members</h4><table id="mTbl"><thead><tr><th>ID</th><th>Name</th><th>Balance</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>`;
+  view.appendChild(c);
+  document.getElementById('addM').addEventListener('click', ()=>{ const name=document.getElementById('mName').value.trim(); const phone=document.getElementById('mPhone').value.trim(); const pass=document.getElementById('mPass').value.trim(); if(!name||!pass) return alert('Name & password'); const id=uid('M'); MEMBERS.push({id,name,phone,pass,balance:0}); save(K.members,MEMBERS); renderMembersAdmin(); });
+  const tb=document.querySelector('#mTbl tbody'); tb.innerHTML=''; MEMBERS.forEach(m=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${m.id}</td><td>${m.name}</td><td>₹${m.balance||0}</td><td><button data-id="${m.id}" class="viewM">View</button> <button data-id="${m.id}" class="delM">Delete</button></td>`; tb.appendChild(tr); });
+  Array.from(document.querySelectorAll('.viewM')).forEach(b=>b.addEventListener('click', e=> viewMemberDetail(e.target.dataset.id)));
+  Array.from(document.querySelectorAll('.delM')).forEach(b=>b.addEventListener('click', e=>{ if(confirm('Delete member?')){ const id=e.target.dataset.id; const idx=MEMBERS.findIndex(x=>x.id===id); if(idx>=0) MEMBERS.splice(idx,1); save(K.members,MEMBERS); renderMembersAdmin(); } }));
+}
+function viewMemberDetail(id){ const m=MEMBERS.find(x=>x.id===id); if(!m) return alert('Member not found'); view.innerHTML=''; const c=document.createElement('div'); c.className='card';
+  c.innerHTML = `<h3>${m.name} (${m.id})</h3><div class="row"><div class="col"><div class="small">Phone</div><div>${m.phone||''}</div></div><div class="col"><div class="small">Balance</div><div style="font-weight:700">₹${m.balance||0}</div></div></div><label>Credit amount</label><input id="credAmt" type="number" value="100"><div class="row"><button id="doCred" class="primary">Credit</button><button id="back" class="ghost">Back</button></div><h4>Recent Transactions</h4><table id="mTx"><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Notes</th></tr></thead><tbody></tbody></table>`;
+  view.appendChild(c);
+  document.getElementById('back').addEventListener('click', renderMembersAdmin);
+  document.getElementById('doCred').addEventListener('click', ()=>{ const amt=Number(document.getElementById('credAmt').value)||0; m.balance=(m.balance||0)+amt; save(K.members,MEMBERS); addLedger({type:'credit',by:CTX.name,from:m.id,amount:amt,notes:'Admin credit'}); alert('Credited'); viewMemberDetail(id); });
+  const tb=document.querySelector('#mTx tbody'); tb.innerHTML=''; LEDGER.filter(l=> l.from===m.id || l.by===m.id).slice().reverse().forEach(l=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${new Date(l.date).toLocaleString()}</td><td>${l.type}</td><td>₹${l.amount||0}</td><td>${l.notes||''}</td>`; tb.appendChild(tr); });
+}
+
+/* ---------------- Staff ---------------- */
+function renderStaffAdmin(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Staff Management</h3><label>Name</label><input id='sName'><label>Role</label><select id='sRole'><option value='collector'>Collector</option><option value='sales'>Sales</option><option value='manufacturing'>Manufacturing</option><option value='delivery'>Delivery</option></select><button id='addS' class='primary'>Add Staff</button><h4>List</h4><table id='sTbl'><thead><tr><th>Name</th><th>Role</th><th>Tasks</th><th>Actions</th></tr></thead><tbody></tbody></table>`; view.appendChild(c);
+  document.getElementById('addS').addEventListener('click', ()=>{ const name=document.getElementById('sName').value.trim(); const role=document.getElementById('sRole').value; if(!name) return alert('Name'); STAFF.push({name,role,tasksCompleted:0}); save(K.staff,STAFF); renderStaffAdmin(); });
+  const tb=document.querySelector('#sTbl tbody'); tb.innerHTML=''; STAFF.forEach((s,i)=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.name}</td><td>${s.role}</td><td>${s.tasksCompleted||0}</td><td><button data-i='${i}' class='delS'>Remove</button></td>`; tb.appendChild(tr); });
+  Array.from(document.querySelectorAll('.delS')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; if(confirm('Remove staff?')){ STAFF.splice(i,1); save(K.staff,STAFF); renderStaffAdmin(); } }));
+}
+
+/* ---------------- Products ---------------- */
+function renderProductsAdmin(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Products & Inventory</h3><div class='row'><div class='col'><label>Name</label><input id='pName'><label>Price</label><input id='pPrice' type='number' value='0'><label>Stock</label><input id='pStock' type='number' value='0'><button id='addP' class='primary'>Add / Update</button></div><div class='col'><h4>Inventory</h4><table id='pTbl'><thead><tr><th>Name</th><th>Price</th><th>Stock</th><th>Sold</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>`; view.appendChild(c);
+  document.getElementById('addP').addEventListener('click', ()=>{ const name=document.getElementById('pName').value.trim(); const price=Number(document.getElementById('pPrice').value)||0; const stock=Number(document.getElementById('pStock').value)||0; if(!name) return alert('Name'); const ex = PRODUCTS.find(p=>p.name===name); if(ex){ ex.price=price; ex.stock=stock; } else PRODUCTS.push({id:uid('P'),name,price,stock,sold:0}); save(K.products,PRODUCTS); renderProductsAdmin(); });
+  const tb=document.querySelector('#pTbl tbody'); tb.innerHTML=''; PRODUCTS.forEach((p,i)=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${p.name}</td><td>₹${p.price}</td><td>${p.stock}</td><td>₹${p.sold}</td><td><button data-i='${i}' class='delP'>Remove</button></td>`; tb.appendChild(tr); });
+  Array.from(document.querySelectorAll('.delP')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; if(confirm('Remove product?')){ PRODUCTS.splice(i,1); save(K.products,PRODUCTS); renderProductsAdmin(); } }));
+}
+
+/* ---------------- Daily Plans (create + deposit + maturity) ---------------- */
+function renderDailyPlansAdmin(){
+  view.innerHTML=''; const c=document.createElement('div'); c.className='card';
+  c.innerHTML = `<h3>Daily Collection Plans</h3><div class='row'><div class='col'><label>Member ID</label><input id='planMember' placeholder='Mxxxx'><label>Daily Amount</label><input id='planAmt' type='number' value='50'><label>Days</label><input id='planDays' type='number' value='90'></div><div class='col'><label>Start Date</label><input id='planStart' type='date' value='${today()}'><label>Interest (annual %)</label><input id='planRate' type='number' value='${SETTINGS.dailyInterestAnnual||DEFAULTS.dailyInterestAnnual}'><div style='margin-top:10px'><button id='createPlan' class='primary'>Create Plan</button><button id='viewPlans' class='ghost'>View All Plans</button></div></div></div><div class='small'>Interest paid at maturity. Deposits recorded per day by staff.</div>`;
+  view.appendChild(c);
+  document.getElementById('createPlan').addEventListener('click', ()=>{ const member=document.getElementById('planMember').value.trim(); const amt=Number(document.getElementById('planAmt').value)||0; const days=Number(document.getElementById('planDays').value)||90; const start=document.getElementById('planStart').value; const rate=Number(document.getElementById('planRate').value)||SETTINGS.dailyInterestAnnual; if(!member||amt<=0) return alert('Member & amount required'); const plan={id:Date.now(),member,dailyAmt:amt,days,startDate:start,rateAnnual:rate,deposits:[],active:true,createdOn:nowISO()}; DAILY_PLANS.push(plan); save(K.dailyPlans,DAILY_PLANS); addLedger({type:'planCreate',by:CTX.name,from:member,amount:amt*days,notes:`DailyPlan ${days}d`}); alert('Plan created'); });
+  document.getElementById('viewPlans').addEventListener('click', renderDailyPlansList);
+}
+function renderDailyPlansList(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Daily Plans</h3><table id='plansTbl'><thead><tr><th>Member</th><th>Daily</th><th>Days</th><th>Start</th><th>Deposited</th><th>Maturity Est</th><th>Actions</th></tr></thead><tbody></tbody></table>`; view.appendChild(c);
+  const tb=document.querySelector('#plansTbl tbody'); tb.innerHTML=''; DAILY_PLANS.forEach((p,i)=>{ const deposited=p.deposits.reduce((s,d)=>s+d.amount,0); const principal=p.dailyAmt*p.days; const interest=Math.round(principal * (p.rateAnnual||SETTINGS.dailyInterestAnnual) * (p.days/365) /100); const maturity = principal + interest; const tr=document.createElement('tr'); tr.innerHTML=`<td>${p.member}</td><td>₹${p.dailyAmt}</td><td>${p.days}</td><td>${p.startDate}</td><td>₹${deposited}</td><td>₹${maturity}</td><td><button data-i='${i}' class='viewPlan'>View</button> <button data-i='${i}' class='payout'>Payout</button></td>`; tb.appendChild(tr); });
+  Array.from(document.querySelectorAll('.viewPlan')).forEach(b=>b.addEventListener('click', e=> renderDailyPlanDetail(+e.target.dataset.i)));
+  Array.from(document.querySelectorAll('.payout')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; const p=DAILY_PLANS[i]; const principal=p.dailyAmt*p.days; const interest=Math.round(principal * (p.rateAnnual||SETTINGS.dailyInterestAnnual) * (p.days/365) /100); const maturity=principal+interest; const m = MEMBERS.find(x=>x.id===p.member); if(m){ m.balance=(m.balance||0)+maturity; save(K.members,MEMBERS); } p.active=false; p.paidOn=nowISO(); save(K.dailyPlans,DAILY_PLANS); addLedger({type:'planPayout',by:CTX.name,from:p.member,amount:maturity,notes:'DailyPlan payout'}); alert('Payout done ₹'+maturity); renderDailyPlansList(); })); 
+}
+function renderDailyPlanDetail(index){ const p=DAILY_PLANS[index]; if(!p) return alert('Plan not found'); view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Plan: ${p.member}</h3><div class='small'>Daily ₹${p.dailyAmt} • ${p.days} days • Start ${p.startDate}</div><label>Record Deposit (today)</label><input id='depAmt' type='number' value='${p.dailyAmt}'><label>Collected by</label><select id='depBy'></select><div class='row'><button id='saveDep' class='primary'>Save Deposit</button><button id='backPlans' class='ghost'>Back</button></div><h4>Deposits</h4><table id='depTbl'><thead><tr><th>Date</th><th>Amount</th><th>By</th></tr></thead><tbody></tbody></table>`; view.appendChild(c); renderStaffSelect('depBy'); const tb=document.querySelector('#depTbl tbody'); tb.innerHTML = p.deposits.map(d=>`<tr><td>${d.date}</td><td>₹${d.amount}</td><td>${d.by}</td></tr>`).join(''); document.getElementById('backPlans').addEventListener('click', renderDailyPlansList); document.getElementById('saveDep').addEventListener('click', ()=>{ const amt=Number(document.getElementById('depAmt').value)||0; const by=document.getElementById('depBy').value||CTX.name; p.deposits.push({date:today(),amount:amt,by}); save(K.dailyPlans,DAILY_PLANS); COLLECTIONS.push({id:Date.now(),date:today(),member:p.member,amount:amt,by,notes:'DailyPlan'}); save(K.collections,COLLECTIONS); const m = MEMBERS.find(x=>x.id===p.member); if(m){ m.balance=(m.balance||0)+amt; save(K.members,MEMBERS); } addLedger({type:'collection',by,from:p.member,amount:amt,notes:'DailyPlan deposit'}); alert('Deposit recorded'); renderDailyPlanDetail(index); }); }
+
+/* ---------------- Staff select helper ---------------- */
+function renderStaffSelect(selectId){ const sel=document.getElementById(selectId); if(!sel) return; sel.innerHTML=''; STAFF.forEach(s=>{ const o=document.createElement('option'); o.value=s.name; o.textContent=s.name; sel.appendChild(o); }); }
+
+/* ---------------- Staff: run daily plans ---------------- */
+function renderDailyPlansRun(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Run Daily Plans (Staff)</h3><table id='runTbl'><thead><tr><th>Member</th><th>Daily</th><th>Deposited</th><th>Action</th></tr></thead><tbody></tbody></table>`; view.appendChild(c); const tb=document.querySelector('#runTbl tbody'); tb.innerHTML=''; DAILY_PLANS.filter(p=>p.active).forEach((p,i)=>{ const deposited=p.deposits.reduce((s,d)=>s+d.amount,0); const tr=document.createElement('tr'); tr.innerHTML=`<td>${p.member}</td><td>₹${p.dailyAmt}</td><td>₹${deposited}</td><td><button data-i='${i}' class='runDep'>Record</button></td>`; tb.appendChild(tr); }); Array.from(document.querySelectorAll('.runDep')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; const p=DAILY_PLANS[i]; const amt=p.dailyAmt; p.deposits.push({date:today(),amount:amt,by:CTX.name}); save(K.dailyPlans,DAILY_PLANS); COLLECTIONS.push({id:Date.now(),date:today(),member:p.member,amount:amt,by:CTX.name,notes:'DailyPlan'}); save(K.collections,COLLECTIONS); const m = MEMBERS.find(x=>x.id===p.member); if(m){ m.balance=(m.balance||0)+amt; save(K.members,MEMBERS); } addLedger({type:'collection',by:CTX.name,from:p.member,amount:amt,notes:'DailyPlan deposit'}); alert('Recorded'); renderDailyPlansRun(); })); }
+
+/* ---------------- Collections Admin ---------------- */
+function renderCollectionsAdmin(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Collections</h3><label>Filter date</label><input id='fltCol' type='date'><button id='fltBtn' class='ghost'>Filter</button><table id='colTbl'><thead><tr><th>Date</th><th>Member</th><th>Amount</th><th>By</th><th>Notes</th></tr></thead><tbody></tbody></table>`; view.appendChild(c); document.getElementById('fltBtn').addEventListener('click', ()=> renderCollectionsAdminTable(document.getElementById('fltCol').value)); renderCollectionsAdminTable(); }
+function renderCollectionsAdminTable(date){ const tb=document.querySelector('#colTbl tbody'); tb.innerHTML=''; const rows = date ? COLLECTIONS.filter(c=>c.date===date) : COLLECTIONS; rows.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.date}</td><td>${r.member}</td><td>₹${r.amount}</td><td>${r.by}</td><td>${r.notes||''}</td>`; tb.appendChild(tr); }); }
+
+/* ---------------- Loans ---------------- */
+function renderLoansAdmin(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Loans</h3><label>Member ID</label><input id='loanMember'><label>Principal</label><input id='loanPrincipal' type='number' value='1000'><label>Months</label><input id='loanMonths' type='number' value='3'><button id='issueLoan' class='primary'>Issue Loan</button><button id='viewLoans' class='ghost'>View Loans</button>`; view.appendChild(c);
+  document.getElementById('issueLoan').addEventListener('click', ()=>{ const member=document.getElementById('loanMember').value.trim(); const principal=Number(document.getElementById('loanPrincipal').value)||0; const months=Number(document.getElementById('loanMonths').value)||1; if(!member||principal<=0) return alert('Member & amount'); const loan={id:Date.now(),member,principal,months,monthlyPct:SETTINGS.loanMonthlyPct||DEFAULTS.loanMonthlyPct,issuedOn:nowISO(),payments:[],outstanding:principal,closed:false}; LOANS.push(loan); save(K.loans,LOANS); const m=MEMBERS.find(x=>x.id===member); if(m){ m.balance=(m.balance||0)+principal; save(K.members,MEMBERS);} addLedger({type:'loanIssue',by:CTX.name,from:member,amount:principal,notes:'Loan issued'}); alert('Loan issued'); });
+  document.getElementById('viewLoans').addEventListener('click', renderLoanList);
+}
+function renderLoanList(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>All Loans</h3><table id='loanTbl'><thead><tr><th>Member</th><th>Principal</th><th>Outstanding</th><th>Issued</th><th>Actions</th></tr></thead><tbody></tbody></table>`; view.appendChild(c); const tb=document.querySelector('#loanTbl tbody'); tb.innerHTML=''; LOANS.forEach((l,i)=>{ const m=MEMBERS.find(x=>x.id===l.member)||{name:l.member}; const tr=document.createElement('tr'); tr.innerHTML=`<td>${m.name} (${l.member})</td><td>₹${l.principal}</td><td>₹${l.outstanding}</td><td>${new Date(l.issuedOn).toLocaleDateString()}</td><td><button data-i='${i}' class='recPay'>Record Payment</button></td>`; tb.appendChild(tr); }); Array.from(document.querySelectorAll('.recPay')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; const amt=Number(prompt('Enter payment amount','100')||0); if(!amt) return; LOANS[i].payments.push({date:nowISO(),amount:amt}); LOANS[i].outstanding = Math.max(0, (LOANS[i].outstanding||LOANS[i].principal)-amt); if(LOANS[i].outstanding===0) LOANS[i].closed=true; save(K.loans,LOANS); const m=MEMBERS.find(x=>x.id===LOANS[i].member); if(m){ m.balance = Math.max(0,(m.balance||0)-amt); save(K.members,MEMBERS); } addLedger({type:'loanPayment',by:CTX.name,from:LOANS[i].member,amount:amt,notes:'Loan payment'}); alert('Payment recorded'); renderLoanList(); }))}
+
+/* ---------------- SIP & SWP (FULL) ----------------
+   SIP: future value of series (periodic deposits)
+   FV = P * ( (1 + r/n)^(n*t) - 1 ) / (r/n)
+   For monthly installments: n=12, t = months/12
+--------------------------------------------------*/
+
+/* helper: compute SIP maturity (P per period, annualRate in %, months, period = 'monthly'|'daily') */
+function computeSipMaturity(P, annualRatePct, months, period){
+  if(months<=0) return 0;
+  const r = annualRatePct/100;
+  if(period==='monthly'){
+    const n = 12;
+    const t = months/12;
+    const ratePer = r / n;
+    // FV of annuity (payments at end of period)
+    const fv = P * ( (Math.pow(1+ratePer, n*t) - 1) / ratePer );
+    return Math.round(fv);
+  } else if(period==='daily'){
+    const n = 365;
+    const t = months/12;
+    const ratePer = r / n;
+    const fv = P * ( (Math.pow(1+ratePer, n*t) - 1) / ratePer );
+    return Math.round(fv);
+  } else {
+    // fallback monthly
+    return computeSipMaturity(P, annualRatePct, months, 'monthly');
+  }
+}
+
+/* admin view to manage SIP + SWP */
+function renderSIPSWPAdmin(){
+  view.innerHTML=''; const c=document.createElement('div'); c.className='card';
+  c.innerHTML = `<h3>SIP & SWP Management</h3>
+  <div class='row'>
+    <div class='col'>
+      <h4>Create SIP</h4>
+      <label>Member ID</label><input id='sipMember'>
+      <label>Amount per period</label><input id='sipAmount' type='number' value='100'>
+      <label>Period</label><select id='sipPeriod'><option value='monthly'>Monthly</option><option value='daily'>Daily</option></select>
+      <label>Months</label><input id='sipMonths' type='number' value='12'>
+      <label>Annual Interest %</label><input id='sipRate' type='number' value='6'>
+      <button id='createSip' class='primary'>Create SIP</button>
+    </div>
+    <div class='col'>
+      <h4>Create SWP</h4>
+      <label>Member ID</label><input id='swpMember'>
+      <label>Amount per period</label><input id='swpAmount' type='number' value='100'>
+      <label>Period</label><select id='swpPeriod'><option value='monthly'>Monthly</option><option value='weekly'>Weekly</option></select>
+      <label>Months</label><input id='swpMonths' type='number' value='6'>
+      <button id='createSwp' class='primary'>Create SWP</button>
+    </div>
+  </div>
+  <div style='margin-top:12px'><button id='viewSips' class='ghost'>View SIPs</button> <button id='viewSwps' class='ghost'>View SWPs</button></div>
+  <div class='small' style='margin-top:8px'>SIP maturity estimated using periodic compounding. Record payments manually or use staff scheduled execution.</div>`;
+  view.appendChild(c);
+
+  document.getElementById('createSip').addEventListener('click', ()=>{
+    const member=document.getElementById('sipMember').value.trim(); const amt=Number(document.getElementById('sipAmount').value)||0; const period=document.getElementById('sipPeriod').value; const months=Number(document.getElementById('sipMonths').value)||12; const rate=Number(document.getElementById('sipRate').value)||6;
+    if(!member||amt<=0) return alert('Member & amount required');
+    const sip={id:Date.now(), member, amount:amt, period, months, rate, paid:[], active:true, createdOn:nowISO()};
+    // estimated maturity
+    sip.estimatedMaturity = computeSipMaturity(amt, rate, months, period);
+    SIPS.push(sip); save(K.sips,SIPS); addLedger({type:'sipCreate',by:CTX.name,from:member,amount:amt,notes:`SIP ${period} ${months}m`}); alert('SIP created • Est. maturity ₹'+sip.estimatedMaturity);
+  });
+
+  document.getElementById('createSwp').addEventListener('click', ()=>{
+    const member=document.getElementById('swpMember').value.trim(); const amt=Number(document.getElementById('swpAmount').value)||0; const period=document.getElementById('swpPeriod').value; const months=Number(document.getElementById('swpMonths').value)||6;
+    if(!member||amt<=0) return alert('Member & amount required');
+    const swp={id:Date.now(), member, amount:amt, period, months, executed:[], active:true, createdOn:nowISO()};
+    SWPS.push(swp); save(K.swps,SWPS); addLedger({type:'swpCreate',by:CTX.name,from:member,amount:amt,notes:`SWP ${period} ${months}m`}); alert('SWP created');
+  });
+
+  document.getElementById('viewSips').addEventListener('click', renderSIPList);
+  document.getElementById('viewSwps').addEventListener('click', renderSWPList);
+}
+
+/* view all SIPs and actions */
+function renderSIPList(){
+  view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>All SIPs</h3><table id='sipsTbl'><thead><tr><th>Member</th><th>Amt</th><th>Period</th><th>Months</th><th>Est Maturity</th><th>Paid</th><th>Actions</th></tr></thead><tbody></tbody></table>`; view.appendChild(c);
+  const tb=document.querySelector('#sipsTbl tbody'); tb.innerHTML='';
+  SIPS.forEach((s,i)=>{ const m=MEMBERS.find(x=>x.id===s.member)||{name:s.member}; const paidTotal = (s.paid||[]).reduce((sum,p)=>sum+p.amount,0); const tr=document.createElement('tr'); tr.innerHTML=`<td>${m.name} (${s.member})</td><td>₹${s.amount}</td><td>${s.period}</td><td>${s.months}</td><td>₹${s.estimatedMaturity||'—'}</td><td>₹${paidTotal}</td><td><button data-i='${i}' class='payNow'>Record Payment</button> <button data-i='${i}' class='cancelSip'>Cancel</button></td>`; tb.appendChild(tr); });
+  Array.from(document.querySelectorAll('.payNow')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; const sp=SIPS[i]; const amt=sp.amount; const m=MEMBERS.find(x=>x.id===sp.member); if(m){ m.balance=(m.balance||0)+amt; save(K.members,MEMBERS); } sp.paid.push({date:nowISO(),amount:amt}); save(K.sips,SIPS); addLedger({type:'sipPay',by:CTX.name,from:sp.member,amount:amt,notes:'SIP payment'}); alert('SIP payment recorded and credited to member'); renderSIPList(); }));
+  Array.from(document.querySelectorAll('.cancelSip')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; if(confirm('Cancel SIP?')){ SIPS[i].active=false; save(K.sips,SIPS); renderSIPList(); } }));
+}
+
+/* view all SWPs and actions */
+function renderSWPList(){
+  view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>All SWPs</h3><table id='swpsTbl'><thead><tr><th>Member</th><th>Amt</th><th>Months</th><th>Executed</th><th>Actions</th></tr></thead><tbody></tbody></table>`; view.appendChild(c);
+  const tb=document.querySelector('#swpsTbl tbody'); tb.innerHTML='';
+  SWPS.forEach((s,i)=>{ const m=MEMBERS.find(x=>x.id===s.member)||{name:s.member}; const execCount=(s.executed||[]).length; const tr=document.createElement('tr'); tr.innerHTML=`<td>${m.name} (${s.member})</td><td>₹${s.amount}</td><td>${s.months||'-'}</td><td>${execCount}</td><td><button data-i='${i}' class='execSwp'>Execute</button> <button data-i='${i}' class='cancelSwp'>Cancel</button></td>`; tb.appendChild(tr); });
+  Array.from(document.querySelectorAll('.execSwp')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; const sw=SWPS[i]; const m = MEMBERS.find(x=>x.id===sw.member); if(!m) return alert('Member not found'); if(m.balance < sw.amount) return alert('Insufficient balance'); m.balance -= sw.amount; save(K.members,MEMBERS); sw.executed = sw.executed||[]; sw.executed.push({date:nowISO(),amount:sw.amount}); save(K.swps,SWPS); addLedger({type:'swpExec',by:CTX.name,from:sw.member,amount:sw.amount,notes:'SWP executed'}); alert('SWP executed and amount withdrawn from member'); renderSWPList(); }));
+  Array.from(document.querySelectorAll('.cancelSwp')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; if(confirm('Cancel SWP?')){ SWPS[i].active=false; save(K.swps,SWPS); renderSWPList(); } }));
+}
+
+/* staff helper to let staff record SIP/SWP payments */
+function renderSIPSWPStaff(){
+  view.innerHTML=''; const c=document.createElement('div'); c.className='card';
+  c.innerHTML=`<h3>SIP / SWP - Staff</h3><div class='row'><div class='col'><h4>Record SIP Payment</h4><label>SIP</label><select id='staffSipSelect'></select><button id='staffPaySip' class='primary'>Record Payment</button></div><div class='col'><h4>Execute SWP</h4><label>SWP</label><select id='staffSwpSelect'></select><button id='staffExecSwp' class='primary'>Execute SWP</button></div></div>`;
+  view.appendChild(c);
+  const sipSel=document.getElementById('staffSipSelect'); const swpSel=document.getElementById('staffSwpSelect');
+  SIPS.forEach((s,i)=> sipSel.innerHTML += `<option value='${i}'>${s.member} • ₹${s.amount} • ${s.period}</option>`);
+  SWPS.forEach((s,i)=> swpSel.innerHTML += `<option value='${i}'>${s.member} • ₹${s.amount}</option>`);
+  document.getElementById('staffPaySip').addEventListener('click', ()=>{ const i=Number(sipSel.value); const sp=SIPS[i]; if(!sp) return alert('Select'); const amt=sp.amount; const m=MEMBERS.find(x=>x.id===sp.member); if(m){ m.balance=(m.balance||0)+amt; save(K.members,MEMBERS); } sp.paid.push({date:nowISO(),amount:amt}); save(K.sips,SIPS); addLedger({type:'sipPay',by:CTX.name,from:sp.member,amount:amt}); alert('SIP payment recorded'); });
+  document.getElementById('staffExecSwp').addEventListener('click', ()=>{ const i=Number(swpSel.value); const sw=SWPS[i]; if(!sw) return alert('Select'); const m=MEMBERS.find(x=>x.id===sw.member); if(!m) return alert('Member not found'); if(m.balance < sw.amount) return alert('Insufficient'); m.balance -= sw.amount; save(K.members,MEMBERS); sw.executed = sw.executed||[]; sw.executed.push({date:nowISO(),amount:sw.amount}); save(K.swps,SWPS); addLedger({type:'swpExec',by:CTX.name,from:sw.member,amount:sw.amount}); alert('SWP executed'); });
+}
+
+/* ---------------- Events, Sales, Reports (short) ---------------- */
+function renderEventsAdmin(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Events & YouTube / School</h3><label>Title</label><input id='evTitle'><label>Date</label><input id='evDate' type='date'><label>Notes</label><input id='evNotes'><button id='addEv' class='primary'>Add Event</button><h4>Upcoming</h4><table id='evTbl'><thead><tr><th>Title</th><th>Date</th><th>Actions</th></tr></thead><tbody></tbody></table>`; view.appendChild(c);
+  document.getElementById('addEv').addEventListener('click', ()=>{ const title=document.getElementById('evTitle').value.trim(); const date=document.getElementById('evDate').value; const notes=document.getElementById('evNotes').value; if(!title||!date) return alert('Title & date'); EVENTS.push({id:Date.now(),title,date,notes}); save(K.events,EVENTS); renderEventsAdmin(); });
+  const tb=document.querySelector('#evTbl tbody'); tb.innerHTML=''; EVENTS.forEach((e,i)=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${e.title}</td><td>${e.date}</td><td><button data-i='${i}' class='delEv'>Remove</button></td>`; tb.appendChild(tr); });
+  Array.from(document.querySelectorAll('.delEv')).forEach(b=>b.addEventListener('click', e=>{ const i=+e.target.dataset.i; if(confirm('Remove?')){ EVENTS.splice(i,1); save(K.events,EVENTS); renderEventsAdmin(); } }));
+}
+function renderMemberEvents(){ view.innerHTML=''; const m=MEMBERS.find(x=>x.id===CTX.id); const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Upcoming Events</h3><table id='mEv'><thead><tr><th>Title</th><th>Date</th></tr></thead><tbody></tbody></table>`; view.appendChild(c); const tb=document.querySelector('#mEv tbody'); tb.innerHTML=''; EVENTS.forEach(e=> tb.innerHTML += `<tr><td>${e.title}</td><td>${e.date}</td></tr>`); }
+
+/* Sales staff */
+function renderSalesStaff(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Record Sale</h3><label>Product</label><select id='saleProd'></select><label>Qty</label><input id='saleQty' type='number' value='1'><label>Buyer Member ID (optional)</label><input id='saleBuyer'><div class='row'><button id='doSale' class='primary'>Record Sale</button><button id='backS' class='ghost'>Back</button></div>`; view.appendChild(c); const sel=document.getElementById('saleProd'); sel.innerHTML=''; PRODUCTS.forEach(p=> sel.innerHTML += `<option value='${p.id}'>${p.name} — ₹${p.price} (stock ${p.stock})</option>`); document.getElementById('doSale').addEventListener('click', ()=>{ const pid=document.getElementById('saleProd').value; const qty=Number(document.getElementById('saleQty').value)||1; const buyer=document.getElementById('saleBuyer').value.trim(); const prod=PRODUCTS.find(x=>x.id===pid); if(!prod) return alert('Select product'); if(prod.stock < qty) return alert('Not enough stock'); const total=prod.price*qty; prod.stock -= qty; prod.sold = (prod.sold||0) + total; save(K.products,PRODUCTS); if(buyer){ const m=MEMBERS.find(x=>x.id===buyer); if(m){ m.balance = (m.balance||0) - total; save(K.members,MEMBERS); } } addLedger({type:'sale',by:CTX.name,from:buyer||'cash',amount:total,notes:`${prod.name} x${qty}`}); alert('Sale recorded ₹'+total); renderSalesStaff(); }); }
+
+/* ---------------- Reports ---------------- */
+function renderReports(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Reports & Export</h3><div class='row'><div class='col'><label>From</label><input id='rFrom' type='date'></div><div class='col'><label>To</label><input id='rTo' type='date'></div></div><div style='margin-top:8px'><button id='runRpt' class='primary'>Run</button><button id='expCsv' class='ghost'>Export Ledger CSV</button></div><div id='rOut' style='margin-top:10px'></div>`; view.appendChild(c);
+  document.getElementById('runRpt').addEventListener('click', ()=>{ const from=document.getElementById('rFrom').value; const to=document.getElementById('rTo').value; const rows = LEDGER.filter(l=> (!from || new Date(l.date) >= new Date(from)) && (!to || new Date(l.date) <= new Date(to+'T23:59:59'))); let html=`<h4>Transactions ${rows.length}</h4><table><thead><tr><th>Date</th><th>Type</th><th>By</th><th>From/To</th><th>Amount</th><th>Notes</th></tr></thead><tbody>`; rows.forEach(r=> html += `<tr><td>${new Date(r.date).toLocaleString()}</td><td>${r.type}</td><td>${r.by||''}</td><td>${r.from||''}</td><td>₹${r.amount||0}</td><td>${r.notes||''}</td></tr>`); html += '</tbody></table>'; document.getElementById('rOut').innerHTML = html; });
+  document.getElementById('expCsv').addEventListener('click', ()=>{ if(LEDGER.length===0) return alert('No data'); const keys=['date','type','by','from','amount','notes']; const rows = LEDGER.map(r=> keys.map(k=>`"${(r[k]||'').toString().replace(/"/g,'""')}"`).join(',')); const csv = keys.join(',') + '\n' + rows.join('\n'); const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); a.download='nodbot_ledger.csv'; a.click(); });
+}
+
+/* ---------------- Member views ---------------- */
+function renderMemberDashboard(){ const m=MEMBERS.find(x=>x.id===CTX.id); if(!m) return alert('Member not found'); view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Welcome ${m.name}</h3><div class='row'><div class='col'><div class='small'>ID</div><div>${m.id}</div><div class='small'>Balance</div><div style='font-weight:700'>₹${m.balance||0}</div></div><div class='col'><button id='mDep' class='primary'>Deposit ₹100</button><button id='mWith' class='ghost'>Withdraw ₹100</button></div></div>`; view.appendChild(c); document.getElementById('mDep').addEventListener('click', ()=>{ m.balance=(m.balance||0)+100; save(K.members,MEMBERS); addLedger({type:'deposit',by:m.id,from:m.id,amount:100}); alert('Deposited ₹100'); renderMemberDashboard(); }); document.getElementById('mWith').addEventListener('click', ()=>{ if(m.balance<100) return alert('Insufficient'); m.balance-=100; save(K.members,MEMBERS); addLedger({type:'withdraw',by:m.id,from:m.id,amount:100}); alert('Withdrawn'); renderMemberDashboard(); }); }
+function renderMemberDailyPlans(){ const m=MEMBERS.find(x=>x.id===CTX.id); view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>My Daily Plans</h3><table id='myPlans'><thead><tr><th>Daily</th><th>Days</th><th>Deposited</th><th>Maturity est</th></tr></thead><tbody></tbody></table>`; view.appendChild(c); const tb=document.querySelector('#myPlans tbody'); tb.innerHTML=''; DAILY_PLANS.filter(p=>p.member===m.id).forEach(p=>{ const deposited=p.deposits.reduce((s,d)=>s+d.amount,0); const principal=p.dailyAmt*p.days; const interest=Math.round(principal * (p.rateAnnual||SETTINGS.dailyInterestAnnual) * (p.days/365) /100); tb.innerHTML += `<tr><td>₹${p.dailyAmt}</td><td>${p.days}</td><td>₹${deposited}</td><td>₹${principal+interest}</td></tr>`; }); }
+function renderMemberSIPSWP(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; const mySips = SIPS.filter(s=>s.member===CTX.id); const mySwps = SWPS.filter(s=>s.member===CTX.id); c.innerHTML=`<h3>My SIP / SWP</h3><h4>SIPs</h4><table id='mySipTbl'><thead><tr><th>Amt</th><th>Period</th><th>Months</th><th>Paid</th><th>Est Maturity</th></tr></thead><tbody>${mySips.map(s=>`<tr><td>₹${s.amount}</td><td>${s.period}</td><td>${s.months}</td><td>₹${(s.paid||[]).reduce((a,b)=>a+b.amount,0)}</td><td>₹${s.estimatedMaturity||'-'}</td></tr>`).join('')}</tbody></table><h4>SWPs</h4><table id='mySwpTbl'><thead><tr><th>Amt</th><th>Period</th><th>Executed</th></tr></thead><tbody>${mySwps.map(s=>`<tr><td>₹${s.amount}</td><td>${s.period}</td><td>${(s.executed||[]).length}</td></tr>`).join('')}</tbody></table>`; view.appendChild(c); }
+function renderMemberLoans(){ const my=LOANS.filter(l=>l.member===CTX.id); view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>My Loans</h3>`; view.appendChild(c); if(my.length===0){ c.innerHTML += '<div class="small">No loans</div>'; return; } my.forEach(l=>{ const el=document.createElement('div'); el.className='card small'; el.innerHTML=`Loan ₹${l.principal} • Outstanding ₹${l.outstanding||l.principal}`; c.appendChild(el); }); }
+function renderPassbook(memberId){ const m=MEMBERS.find(x=>x.id===memberId); if(!m) return alert('Member not found'); view.innerHTML=''; const c=document.createElement('div'); c.className='card'; let html=`<h3>Passbook — ${m.name} (${m.id})</h3><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Notes</th></tr></thead><tbody>`; LEDGER.filter(l=> l.from===m.id || l.by===m.id).slice().reverse().forEach(l=> html += `<tr><td>${new Date(l.date).toLocaleString()}</td><td>${l.type}</td><td>₹${l.amount||0}</td><td>${l.notes||''}</td></tr>`); html += '</tbody></table>'; c.innerHTML = html; view.appendChild(c); }
+
+/* ---------------- Quick Collect ---------------- */
+function renderQuickCollect(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Quick Collect</h3><label>Member ID</label><input id='qcMember'><label>Amount</label><input id='qcAmount' type='number' value='50'><label>Notes</label><input id='qcNotes'><div class='row'><button id='qcSave' class='primary'>Save</button><button id='qcView' class='ghost'>My Collections</button></div>`; view.appendChild(c); document.getElementById('qcSave').addEventListener('click', ()=>{ const member=document.getElementById('qcMember').value.trim(); const amt=Number(document.getElementById('qcAmount').value)||0; const notes=document.getElementById('qcNotes').value||''; if(!member||amt<=0) return alert('Member & amount required'); COLLECTIONS.push({id:Date.now(),date:today(),member,amount:amt,by:CTX.name,notes}); save(K.collections,COLLECTIONS); FUND.balance=(FUND.balance||0)+amt; save(K.fund,FUND); const m=MEMBERS.find(x=>x.id===member); if(m){ m.balance=(m.balance||0)+amt; save(K.members,MEMBERS);} addLedger({type:'collection',by:CTX.name,from:member,amount:amt,notes}); alert('Saved'); }); document.getElementById('qcView').addEventListener('click', ()=>renderCollectionsList(CTX.name)); }
+
+/* ---------------- Reports / Export / Import ---------------- */
+function exportAll(){ const obj={settings:SETTINGS,staff:STAFF,members:MEMBERS,products:PRODUCTS,ledger:LEDGER,loans:LOANS,sips:SIPS,swps:SWPS,dailyPlans:DAILY_PLANS,collections:COLLECTIONS,events:EVENTS,fund:FUND}; const a=document.createElement('a'); a.href='data:application/json,'+encodeURIComponent(JSON.stringify(obj,null,2)); a.download='nodbot_export.json'; a.click(); }
+function importAll(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='application/json'; inp.onchange = e=>{ const f=e.target.files[0]; const r=new FileReader(); r.onload=ev=>{ try{ const obj=JSON.parse(ev.target.result); if(confirm('Import will overwrite existing data. Continue?')){ SETTINGS=obj.settings||SETTINGS; STAFF=obj.staff||STAFF; MEMBERS=obj.members||MEMBERS; PRODUCTS=obj.products||PRODUCTS; LEDGER=obj.ledger||LEDGER; LOANS=obj.loans||LOANS; SIPS=obj.sips||SIPS; SWPS=obj.swps||SWPS; DAILY_PLANS=obj.dailyPlans||DAILY_PLANS; COLLECTIONS=obj.collections||COLLECTIONS; EVENTS=obj.events||EVENTS; FUND=obj.fund||FUND; save(K.settings,SETTINGS); save(K.staff,STAFF); save(K.members,MEMBERS); save(K.products,PRODUCTS); save(K.ledger,LEDGER); save(K.loans,LOANS); save(K.sips,SIPS); save(K.swps,SWPS); save(K.dailyPlans,DAILY_PLANS); save(K.collections,COLLECTIONS); save(K.events,EVENTS); save(K.fund,FUND); alert('Imported'); location.reload(); } }catch(err){ alert('Invalid file'); } }; r.readAsText(f); }; inp.click(); }
+
+/* ---------------- Settings ---------------- */
+function renderSettings(){ view.innerHTML=''; const c=document.createElement('div'); c.className='card'; c.innerHTML=`<h3>Settings</h3><label>Admin User</label><input id='setAdminUser' value='${SETTINGS.adminUser}'><label>Admin Pass</label><input id='setAdminPass' value='${SETTINGS.adminPass}'><label>Daily interest (annual %)</label><input id='setDailyInt' type='number' value='${SETTINGS.dailyInterestAnnual||DEFAULTS.dailyInterestAnnual}'><label>Loan monthly %</label><input id='setLoanPct' type='number' value='${SETTINGS.loanMonthlyPct||DEFAULTS.loanMonthlyPct}'><div class='row'><button id='saveSet' class='primary'>Save</button><button id='back' class='ghost'>Back</button></div>`; view.appendChild(c);
+  document.getElementById('saveSet').addEventListener('click', ()=>{ SETTINGS.adminUser=document.getElementById('setAdminUser').value||SETTINGS.adminUser; SETTINGS.adminPass=document.getElementById('setAdminPass').value||SETTINGS.adminPass; SETTINGS.dailyInterestAnnual=Number(document.getElementById('setDailyInt').value)||SETTINGS.dailyInterestAnnual; SETTINGS.loanMonthlyPct=Number(document.getElementById('setLoanPct').value)||SETTINGS.loanMonthlyPct; save(K.settings,SETTINGS); alert('Saved'); renderDashboard(); });
+  document.getElementById('back').addEventListener('click', renderDashboard);
+}
+
+/* ---------------- Init globals mapping for buttons used earlier (so inline calls work) ---------------- */
+window.renderDashboard = renderDashboard;
+window.renderMembersAdmin = renderMembersAdmin;
+window.renderStaffAdmin = renderStaffAdmin;
+window.renderProductsAdmin = renderProductsAdmin;
+window.renderDailyPlansAdmin = renderDailyPlansAdmin;
+window.renderDailyPlansList = renderDailyPlansList;
+window.renderDailyPlansRun = renderDailyPlansRun;
+window.renderCollectionsAdmin = renderCollectionsAdmin;
+window.renderCollectionsList = renderCollectionsList;
+window.renderLoansAdmin = renderLoansAdmin;
+window.renderLoanList = renderLoanList;
+window.renderSIPSWPAdmin = renderSIPSWPAdmin;
+window.renderSIPList = renderSIPList;
+window.renderSWPList = renderSWPList;
+window.renderSIPSWPStaff = renderSIPSWPStaff;
+window.renderEventsAdmin = renderEventsAdmin;
+window.renderReports = renderReports;
+window.renderSettings = renderSettings;
+window.renderSalesStaff = renderSalesStaff;
+window.renderQuickCollect = renderQuickCollect;
+window.renderMemberDashboard = renderMemberDashboard;
+window.renderMemberDailyPlans = renderMemberDailyPlans;
+window.renderMemberSIPSWP = renderMemberSIPSWP;
+window.renderMemberLoans = renderMemberLoans;
+window.renderPassbook = renderPassbook;
+window.renderMemberEvents = renderMemberEvents;
+
+/* done */
+</script>
+</body>
+</html>
